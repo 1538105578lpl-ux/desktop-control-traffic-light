@@ -1,0 +1,24 @@
+# 运行依赖（Windows 10/11，Python 3.12 推荐）
+# 精确可复现版本见 requirements.lock
+
+# --- 控制服务（server/）---
+fastapi>=0.115
+uvicorn>=0.30
+mcp>=1.0
+psutil>=6.0
+pywin32>=306
+pillow>=10.0
+
+# --- 上游 Windows-MCP 依赖（vendor/windows_mcp 直接使用）---
+comtypes>=1.2
+dxcam>=0.0.5
+thefuzz>=0.22
+pyperclip>=1.8
+beautifulsoup4>=4.12
+markdownify>=0.13
+requests>=2.31
+pyyaml>=6.0
+python-dotenv>=1.0
+fastmcp>=0.4
+
+# 注意：vendor/ 中已内含 windows-mcp 0.8.5 源码，无需再 pip install windows-mcp。
