@@ -1,0 +1,47 @@
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+uv-cache/
+.pytest_cache/
+test-temp/
+
+# ---------- 运行时数据（可能含会话内容、任务文本、本地 token）----------
+# 这些文件由程序在运行时生成，绝不要提交
+panel-runtime/
+**/panel-runtime/
+connection.json
+hook-events.json
+control-intent.json
+service.log
+
+# 桌宠运行时状态
+pet/state.json
+pet/state.json.lock
+pet/pos.json
+pet/wb_pid.txt
+pet/pet_launch.txt
+pet/pet_suppressed.txt
+pet/watchdog_heartbeat.txt
+pet/watchdog_disabled.txt
+pet/watchdog.pid
+
+# 日志与诊断
+*.log
+*.txt
+!requirements.txt
+
+# 备份
+*.bak
+*.bak-*
+*.bak_*
+backups/
+
+# ---------- 编辑器 / 系统 ----------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
