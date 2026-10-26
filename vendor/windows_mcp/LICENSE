@@ -1,0 +1,35 @@
+MIT License
+
+Copyright (c) CursorTouch
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+适用范围 / Scope
+
+本文件适用于 `vendor/windows_mcp/` 目录下的第三方代码。
+
+- 上游项目：https://github.com/CursorTouch/Windows-MCP
+- 基线版本：0.8.5
+- 本项目对其所做的修改，见 `docs/UPSTREAM-DIFF.md`
+- 完整第三方声明（含遥测说明），见仓库根目录 `NOTICE.md`
+
+仓库根目录的 `LICENSE` 仅适用于本项目自有代码（pet/、server/、tests/、skills/、docs/ 等），
+不改变上游代码的原始版权归属。
