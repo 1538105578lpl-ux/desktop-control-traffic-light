@@ -1,138 +1,146 @@
 # Desktop Control Traffic Light
 
-**[English](README.en.md) · 中文**
+**A status light your AI desktop agent can't hide behind — and a brake you can hit at any moment.**
 
-**给 AI 桌面代理一盏看得见的灯，和一只随时能按的刹车。**
+_English · [中文](README.zh-CN.md)_
 
-AI 在替你操作电脑时，右下角有盏小灯告诉你它在干嘛；点一下就能暂停，再点一下把键盘还给你。
-恢复必须由你在原任务里明确说「继续」——别的任何操作都不算。
+While an AI is driving your computer, a small light in the corner of your screen tells you what it's doing.
+Click it to pause. Click again and you get your keyboard back. Resuming requires you — inside the original
+task — to explicitly say "continue". Nothing else counts.
 
-> 适配 Windows 10/11 + Python 3.12。桌面悬浮窗用 tkinter，控制服务用 FastAPI，
-> 底层驱动是 [Windows-MCP](https://github.com/CursorTouch/Windows-MCP) 0.8.5（已内含修复）。
+> Windows 10/11 + Python 3.12. The floating window is tkinter, the control service is FastAPI,
+> and the desktop driver underneath is [Windows-MCP](https://github.com/CursorTouch/Windows-MCP) 0.8.5 (with fixes bundled).
 
-![控制面板展开状态](docs/screenshot.png)
-
----
-
-## 目录 / Contents
-
-- [它解决什么问题](#它解决什么问题)
-- [两半，一套系统](#两半一套系统)
-- [三种灯的含义](#三种灯的含义)
-- [架构](#架构)
-- [快速开始](#快速开始)
-- [配置项](#配置项)
-- [工具清单](#工具清单)
-- [安全模型](#安全模型)
-- [已知限制](#已知限制)
-- [目录结构](#目录结构)
-- [许可](#许可)
+![Control panel, expanded](docs/screenshot.png)
 
 ---
 
-## 它解决什么问题
+## Contents
 
-桌面自动化（Computer Use、桌面 MCP、RPA）默认是个黑盒：
+- [The problem](#the-problem)
+- [Two halves, one system](#two-halves-one-system)
+- [What the lights mean](#what-the-lights-mean)
+- [Architecture](#architecture)
+- [Quick start](#quick-start)
+- [Configuration](#configuration)
+- [Tool surface](#tool-surface)
+- [Security model](#security-model)
+- [Known limitations](#known-limitations)
+- [Repository layout](#repository-layout)
+- [Credits and license](#credits-and-license)
 
-| 问题 | 常见现状 | 本项目的做法 |
+---
+
+## The problem
+
+Desktop automation — Computer Use, desktop MCP, RPA — is a black box by default:
+
+| Problem | What usually happens | What this project does |
 |---|---|---|
-| **看不见** | AI 静默切窗口、点击、输入，你不知道进行到哪一步 | 三色灯 + 当前步骤文案 + 按需展开的实时画面 |
-| **停不下** | 想中止只能杀进程，或者关掉整个客户端 | 全局暂停热键 / 按钮暂停，暂停即释放被按住的按键 |
-| **恢复太随意** | 一句无关的闲聊就可能让 AI 继续动你的键盘 | 暂停是「锁定」状态，只有原任务里明确说「继续」才解除 |
-| **并发打架** | 两个任务同时抢鼠标键盘，操作互相盖掉 | 电脑操作单任务独占锁，其他任务照常做自己的非电脑工作 |
-| **无法回溯** | 做完不知道它到底点了什么 | 每步通过 `TaskProgress` 上报，红绿灯归档到会话状态 |
+| **Can't see it** | The agent silently switches windows, clicks, and types; you have no idea what step it's on | Three-color light + current-step caption + optional live preview |
+| **Can't stop it** | The only way out is killing the process or closing the whole client | Global pause hotkey / pause button; pausing also releases any keys the service is holding down |
+| **Resumes too easily** | A stray line of unrelated chat is enough to let the agent touch your keyboard again | Pause is a **lock**, cleared only by an explicit "continue" inside the original task |
+| **Concurrent collisions** | Two tasks grab mouse and keyboard and overwrite each other's work | Exclusive lock for computer control; other tasks keep doing their own non-desktop work |
+| **No audit trail** | Afterwards you can't tell what it actually clicked | Every step reported via `TaskProgress`; light state archived into session state |
 
-**它不是**：远程控制软件、录屏工具、自动点击器。它只给桌面代理加一层「可见 + 可中止」的壳。
+**It is not** remote-control software, a screen recorder, or an auto-clicker.
+It adds one shell around a desktop agent: **visible, interruptible.**
 
 ---
 
-## 两半，一套系统
+## Two halves, one system
 
-| 模块 | 位置 | 职责 |
+| Module | Location | Responsibility |
 |---|---|---|
-| **桌宠红绿灯** | `pet/` | tkinter 悬浮窗。显示灯色，展开后提供暂停 / 接管 / 画面预览。无控制台、真圆角、可拖动、位置记忆 |
-| **控制服务** | `server/` | 本地 HTTP 服务（`127.0.0.1:18765`）。管暂停锁、任务生命周期、独占锁、截图与状态聚合。带 token 鉴权 |
-| **桌面驱动** | `vendor/windows_mcp/` | 上游 Windows-MCP 0.8.5 + 本仓库移植的 0.8.6–0.8.8 修复 |
+| **Desktop pet / traffic light** | `pet/` | tkinter floating window. Shows light color; when expanded offers pause / take-over / preview. No console window, real rounded corners, draggable, remembers position |
+| **Control service** | `server/` | Local HTTP service (`127.0.0.1:18765`). Owns the pause lock, task lifecycle, exclusive lock, screenshots, and state aggregation. Token-authenticated |
+| **Desktop driver** | `vendor/windows_mcp/` | Upstream Windows-MCP 0.8.5 + the 0.8.6–0.8.8 fixes backported in this repo |
 
-两者通过本地 HTTP + 启动时随机生成的 token 通信，**不经过任何外部网络**。
+The two halves talk over local HTTP with a token generated fresh at startup.
+**No traffic ever leaves the machine.**
 
 ---
 
-## 三种灯的含义
+## What the lights mean
 
-| 灯 | 文案 | 什么时候亮 | 判据 |
+| Light | Label | When it lights | Trigger |
 |:--:|---|---|---|
-| 🔴 红 | 干活中 | 有任务在跑（1 个还是 N 个都一样） | `UserPromptSubmit` / `PermissionRequest` |
-| 🟡 黄 | 等你一下 | **只在两种情况下亮** | ① 真弹出了权限确认框或 MCP 要你输入 ② 红灯静默 5 分钟（卡住了） |
-| 🟢 绿 | 本轮结束 | 当前所有进行中的轮次都已结束 | `Stop` / `SessionEnd` |
-| 🟠 橙闪 | 出错了 | 本轮因 API 错误中断 | `StopFailure` |
-| ⚫ 全灭 | — | 没有进行中的任务 | — |
+| 🔴 Red | Working | A task is running (one or many — same thing) | `UserPromptSubmit` / `PermissionRequest` |
+| 🟡 Yellow | Waiting on you | **Only two cases** | ① A real permission dialog appeared, or the MCP needs your input ② Red has been silent for 5 minutes (stuck) |
+| 🟢 Green | Turn complete | All in-flight turns have finished | `Stop` / `SessionEnd` |
+| 🟠 Orange flashing | Error | The turn died on an API error | `StopFailure` |
+| ⚫ Off | — | Nothing in flight | — |
 
-**设计要点**：绿灯只表示「这一轮结束了」，**不代表结果已验证成功**。工具调用成功 ≠ 任务完成，
-两者刻意区分开，避免给你虚假的安心感。
+**Design note:** green means "this turn ended" — **not** "the result was verified."
+A successful tool call is not a finished task. We keep those two things deliberately separate
+so the light never gives you false comfort.
 
-> ⚠️ 踩过的坑：`PermissionRequest` 每次工具调用都会发（实测 2 分钟 16 次），
-> 早期用它点黄灯导致「明明在干活却显示在等你」。现在它点亮**红灯**——它恰恰证明"我在跑"。
-> `Notification(idle_prompt)` 是固定的 60 秒定时器，同样不点黄灯，只作为排查探针。
+> ⚠️ Lesson learned the hard way: `PermissionRequest` fires on every tool call (16 times in 2 minutes, measured).
+> Wired to yellow in early versions, it produced "supposedly working, but shows as waiting on you."
+> It now lights **red** — it is, after all, proof that something is running.
+> `Notification(idle_prompt)` is a fixed 60-second timer and likewise never turns yellow; it's kept only as a diagnostic probe.
 
 ---
 
-## 架构
+## Architecture
 
 ```mermaid
 flowchart LR
-    U[你] -->|"发指令"| WB[AI 客户端<br/>WorkBuddy]
-    WB -->|"hook 事件 JSON"| HK[pet/hook.py]
-    HK -->|"原子写入"| ST[(state.json)]
-    ST -->|"轮询 200ms"| TL[pet/traffic_light.py<br/>悬浮窗]
+    U[You] -->|"instruction"| WB[AI client<br/>WorkBuddy]
+    WB -->|"hook event JSON"| HK[pet/hook.py]
+    HK -->|"atomic write"| ST[(state.json)]
+    ST -->|"poll 200ms"| TL[pet/traffic_light.py<br/>floating window]
 
-    WB -->|"MCP 调用"| GW[server/panel_gateway.py]
-    GW --> VM[vendor/windows_mcp<br/>桌面驱动]
-    VM -->|"UI Automation"| OS[(桌面应用)]
+    WB -->|"MCP call"| GW[server/panel_gateway.py]
+    GW --> VM[vendor/windows_mcp<br/>desktop driver]
+    VM -->|"UI Automation"| OS[(Desktop apps)]
 
-    TL -->|"暂停 / 接管 / 预览"| GW
-    GW -->|"token 鉴权"| PS[server/panel_service.py]
-    PS -->|"暂停锁 / 独占锁"| VM
+    TL -->|"pause / take-over / preview"| GW
+    GW -->|"token auth"| PS[server/panel_service.py]
+    PS -->|"pause lock / exclusive lock"| VM
 ```
 
-**关键设计**：红绿灯只负责**显示和干预**，实际执行始终由当前 AI 任务驱动。
-灯挂了不影响任务；灯活着也篡改不了任务内容。
+**Key design:** the light only **displays and intervenes**. Execution is always driven by the current AI task.
+If the light dies, your task is unaffected. If the light lives, it still can't alter what the task does.
 
-### 暂停语义（这是本项目最核心的契约）
+### Pause semantics (the core contract of this project)
 
 ```
-运行中 ──[暂停按钮 / Ctrl+Alt+F12 / 接管]──► 已暂停（锁定）
-                                                 │
-                                    只有「原任务里明确说继续」
-                                                 ▼
-                                            重新观察界面 ──► 运行中
+Running ──[pause button / Ctrl+Alt+F12 / take-over]──► Paused (locked)
+                                                          │
+                                    only "continue" spoken inside the original task
+                                                          ▼
+                                                re-observe the screen ──► Running
 ```
 
-- 暂停会：阻止后续所有电脑输入、让旧观察和排队输入失效、**释放本服务按住的按键**
-- 暂停**不会**：被普通闲聊、打开详情、点「回任务」、重连连接器解除
-- 恢复后必须重新 `Snapshot`，核对哪些操作已发生，避免重复输入或重复发送
+- Pausing **does**: block all further computer input, invalidate old observations and queued input,
+  and **release any keys the service is holding**
+- Pausing **does not** get cleared by: casual chat, opening the details panel, clicking "back to task",
+  or reconnecting the client
+- After resuming you must `Snapshot` again and reconcile which actions already happened,
+  to avoid duplicate input or duplicate sends
 
 ---
 
-## 快速开始
+## Quick start
 
-### 前置条件
+### Prerequisites
 
-| 项目 | 要求 |
+| Item | Requirement |
 |---|---|
-| 系统 | Windows 10 / 11 |
-| Python | **3.12**（推荐；3.13 的部分发行版不带 tkinter，会导致桌宠静默启动失败） |
-| 客户端 | 支持 hook 事件 + MCP 的 AI 客户端（本文以 WorkBuddy 为例） |
-| 权限 | 普通用户即可；操作管理员窗口需要对应权限 |
+| OS | Windows 10 / 11 |
+| Python | **3.12** (recommended; some 3.13 distributions ship without tkinter, which makes the pet fail to start silently) |
+| Client | Any AI client with hook events + MCP (this doc uses WorkBuddy as the example) |
+| Privileges | A normal user account is enough; automating elevated windows requires matching privileges |
 
-### 1. 取代码
+### 1. Get the code
 
 ```powershell
 git clone https://github.com/1538105578lpl-ux/desktop-control-traffic-light.git
 cd desktop-control-traffic-light
 ```
 
-### 2. 建环境
+### 2. Create the environment
 
 ```powershell
 py -3.12 -m venv .venv
@@ -140,152 +148,159 @@ py -3.12 -m venv .venv
 pip install -r requirements.txt
 ```
 
-> `vendor/windows_mcp/` 已内含上游源码，**不要**再 `pip install windows-mcp`，
-> 否则会装成不带修复的原版并产生版本冲突。
+> `vendor/windows_mcp/` already contains the upstream source. **Do not** `pip install windows-mcp`
+> on top of it — you'll get the unpatched upstream release and a version conflict.
 
-### 3. 自检
+### 3. Run the self-check
 
 ```powershell
 python -m unittest discover -s tests
 ```
 
-正常应看到 —— 控制面板 / 任务生命周期 / 可靠性三组共 **48 项通过**（`OK`）。
-测试全用 mock，不会真的动你的键鼠。
+You should see **48 tests passing** (`OK`) across three groups: control panel, task lifecycle, and reliability.
+Everything is mocked — the tests never touch your actual keyboard or mouse.
 
-### 4. 注册 MCP
+### 4. Register the MCP server
 
 ```powershell
 .\install.ps1
 ```
 
-脚本会：
-1. 备份 `~/.workbuddy/mcp.json` 到 `~/.workbuddy/backups/`
-2. 写入 `windows-mcp` 条目（指向本仓库 `server/launcher.py serve`）
-3. 把 `skills/windows-desktop-control/SKILL.md` 复制到 `~/.workbuddy/skills/`
-4. **不动**配置文件里的其他 MCP 条目
+The script will:
+1. Back up `~/.workbuddy/mcp.json` to `~/.workbuddy/backups/`
+2. Write a `windows-mcp` entry pointing at this repo's `server/launcher.py serve`
+3. Copy `skills/windows-desktop-control/SKILL.md` into `~/.workbuddy/skills/`
+4. **Leave** every other MCP entry in the config untouched
 
-### 5. 装 hook（点亮灯）
+### 5. Install the hooks (this is what lights the lamp)
 
 ```powershell
 python pet\install_hooks.py
 ```
 
-同样先备份 `settings.json`，然后**增量合并**到 `hooks` 节点——
-不会覆盖你其他工具注册的 hook。
+Same deal: back up `settings.json`, then **merge incrementally** into the `hooks` node —
+hooks registered by your other tools are never overwritten.
 
-### 6. 启动桌宠
+### 6. Start the pet
 
 ```powershell
 pythonw pet\launch_pet.pyw
 ```
 
-想开机自动出现：
+To have it appear automatically at login:
 
 ```powershell
 python pet\manage_watchdog.py install
 ```
 
-看门狗（`pet/watchdog.pyw`）每 1.5 秒轮询一次「客户端在跑 + 灯不在」→ 拉起灯。
-它的状态文件在 `pet/watchdog_heartbeat.txt`，卸载用 `manage_watchdog.py uninstall`。
+The watchdog (`pet/watchdog.pyw`) polls every 1.5 seconds for "client is running + light is missing"
+and relaunches the light. Its state file is `pet/watchdog_heartbeat.txt`;
+remove it with `manage_watchdog.py uninstall`.
 
 ---
 
-## 配置项
+## Configuration
 
-全部通过环境变量覆盖，无需改代码：
+Everything is overridable through environment variables — no code edits required:
 
-| 变量 | 作用 | 默认 |
+| Variable | Purpose | Default |
 |---|---|---|
-| `CONTROL_ROOT` | 控制服务目录（`pet/` 找 `connection.json` 用） | 自动定位到 `../server` |
-| `PET_PYTHONW` | 指定带 tkinter 的 `pythonw.exe` | 依次探测 `%LOCALAPPDATA%\Programs\Python\Python31x` |
-| `PET_PYTHON` | `install_hooks.py` 写进 hook 的解释器 | 当前解释器 |
-| `WORKBUDDY_HOME` | 客户端配置目录 | `~/.workbuddy` |
-| `ANONYMIZED_TELEMETRY` | 上游遥测开关，本服务启动时强制 `false` | `false` |
+| `CONTROL_ROOT` | Control service directory (`pet/` looks here for `connection.json`) | auto-resolved to `../server` |
+| `PET_PYTHONW` | Path to a `pythonw.exe` that has tkinter | probes `%LOCALAPPDATA%\Programs\Python\Python31x` |
+| `PET_PYTHON` | Interpreter that `install_hooks.py` writes into the hooks | current interpreter |
+| `WORKBUDDY_HOME` | Client config directory | `~/.workbuddy` |
+| `ANONYMIZED_TELEMETRY` | Upstream telemetry switch; forced to `false` on service start | `false` |
 
-端口固定 `18765`（`server/panel_common.py`）。改端口需同步改 `pet/desktop_bridge.py`。
+The port is fixed at `18765` (`server/panel_common.py`). Changing it means also updating `pet/desktop_bridge.py`.
 
 ---
 
-## 工具清单
+## Tool surface
 
-控制服务对上暴露 **26 个 MCP 工具**，相对上游的主要增量：
+The control service exposes **26 MCP tools** to the client. The main additions over upstream:
 
-| 类别 | 工具 | 说明 |
+| Category | Tools | Notes |
 |---|---|---|
-| 任务生命周期 | `BeginDesktopTask` / `TaskProgress` / `EndDesktopTask` | 开始前登记、每步上报、结束核验 |
-| 状态 | `ControlStatus` | 查暂停状态、当前任务、占用情况 |
-| 窗口 | `WindowList` / `FocusWindow` / `ReadFocusedInput` | 枚举窗口、置顶并**验证**前台、读焦点控件 |
-| 输入 | `Type` | 返回结构化校验结果（是否真正落进目标控件） |
-| 观察 | `Snapshot` / `Screenshot` | 控件树 + 截图，可单独走 UIA 专用线程 |
-| 常用 | `Click` / `Shortcut` / `Scroll` / `WaitFor` / `App` / `Clipboard` … | 沿用上游 |
+| Task lifecycle | `BeginDesktopTask` / `TaskProgress` / `EndDesktopTask` | Register before starting, report each step, verify on exit |
+| Status | `ControlStatus` | Pause state, current task, occupancy |
+| Windows | `WindowList` / `FocusWindow` / `ReadFocusedInput` | Enumerate, bring to front **and verify** foreground, read the focused control |
+| Input | `Type` | Returns a structured verification result (did it actually land in the target control?) |
+| Observation | `Snapshot` / `Screenshot` | Control tree + screenshot, optionally on a dedicated UIA thread |
+| Everyday | `Click` / `Shortcut` / `Scroll` / `WaitFor` / `App` / `Clipboard` … | Unchanged from upstream |
 
-**刻意不提供**：任意 PowerShell、任意可执行文件启动。
-这两条是桌面 agent 最容易变成「远程代码执行入口」的地方，砍掉后仍可通过文件与 Office 工具完成绝大多数任务。
-
----
-
-## 安全模型
-
-完整版见 [SECURITY.md](SECURITY.md)，四条要点：
-
-1. **只监听回环**：`127.0.0.1:18765`，不接受外部连接
-2. **启动即换 token**：每次启动用 `secrets.token_urlsafe(32)` 生成，进程退出即失效，落盘在 `server/panel-runtime/connection.json`（已 gitignore）
-3. **暂停是锁**：解除必须来自原任务的人类指令，AI 无法自行恢复
-4. **零外部流量**：除可选的上游遥测（默认关）外，不发起任何网络请求
+**Deliberately absent:** arbitrary PowerShell, and launching arbitrary executables.
+Those two are exactly where a desktop agent turns into a remote-code-execution endpoint.
+Removing them still leaves file and Office tools sufficient for the overwhelming majority of tasks.
 
 ---
 
-## 已知限制
+## Security model
 
-诚实列出，避免踩坑：
+Full version in [SECURITY.md](SECURITY.md). Four points:
 
-- **只覆盖桌面客户端**。浏览器自动化、脚本、终端里的操作不受这套输入拦截器管，别把红绿灯当成"全局急停"
-- **预览可能含遮挡内容**。窗口被别的程序盖住时，截图就是被遮住的画面
-- **ProactorEventLoop 的 self-pipe 修复未生效**。上游 `install_selfpipe_guard` 只 patch `BaseSelectorEventLoop`，Windows 默认 `ProactorEventLoop` 下无效，该模块保留但不接入
-- **单显示器坐标** 以主屏虚拟桌面为准，多屏混合 DPI 下坐标可能偏
-- **无代码签名**。首次运行会被 SmartScreen 提示，属正常现象
-- **不做提权**。操作管理员权限窗口需要服务自身以管理员身份运行
+1. **Loopback only** — `127.0.0.1:18765`, external connections are not accepted
+2. **Fresh token every start** — generated with `secrets.token_urlsafe(32)`, invalid the moment the process exits,
+   written to `server/panel-runtime/connection.json` (gitignored)
+3. **Pause is a lock** — releasing it requires a human instruction from inside the original task; the AI cannot self-resume
+4. **Zero external traffic** — apart from optional upstream telemetry (off by default), no network requests are made
 
 ---
 
-## 目录结构
+## Known limitations
+
+Listed honestly, so you don't get surprised:
+
+- **Desktop clients only.** Browser automation, scripts, and terminal operations are not covered by this input
+  interceptor. Don't treat the light as a global emergency stop.
+- **Previews can contain occluded content.** If another program covers the window, the screenshot is the covered picture.
+- **The `ProactorEventLoop` self-pipe fix does not take effect.** Upstream's `install_selfpipe_guard` only patches
+  `BaseSelectorEventLoop`; it is a no-op under Windows' default `ProactorEventLoop`. The module is kept but not wired in.
+- **Single-monitor coordinates** are based on the primary screen's virtual desktop; coordinates can drift under
+  multi-monitor mixed-DPI setups.
+- **No code signing.** SmartScreen will warn you on first run. That's expected.
+- **No privilege escalation.** Automating an elevated window requires the service itself to run elevated.
+
+---
+
+## Repository layout
 
 ```
 desktop-control-traffic-light/
-├── pet/                         # 桌面悬浮窗
-│   ├── traffic_light.py         # 主窗（真圆角、色键透明、状态渲染）
-│   ├── hook.py                  # hook 事件 → 灯色（原子写 state.json）
-│   ├── state_store.py           # 线程/进程安全的状态写入
-│   ├── desktop_bridge.py        # 与控制服务的桥接（暂停/接管/预览）
-│   ├── wbproc.py                # 进程探测、pythonw 查找、WMI 启动
-│   ├── watchdog.pyw             # 开机看门狗
-│   ├── manage_watchdog.py       # 看门狗安装/卸载/状态
-│   ├── install_hooks.py         # 增量写入 hooks 配置
-│   └── launch_pet.pyw           # 双击入口（无黑框）
-├── server/                      # 控制服务
-│   ├── launcher.py              # MCP 入口（关闭遥测）
-│   ├── panel_gateway.py         # 网关：鉴权 + 路由
-│   ├── panel_service.py         # FastAPI 服务核心
-│   ├── panel_common.py          # 端口/连接文件/请求封装
-│   ├── panel_hotkey.py          # Ctrl+Alt+F12 全局热键
-│   ├── control_state.py         # 暂停锁状态机
-│   ├── task_lifecycle.py        # 任务生命周期
-│   ├── input_guard.py           # 输入拦截
-│   ├── reliability.py           # 观察时效/按键释放
-│   └── install_config.ps1       # MCP 注册脚本
-├── vendor/windows_mcp/          # 上游 0.8.5 + 修复（见 docs/UPSTREAM-DIFF.md）
-├── skills/windows-desktop-control/SKILL.md   # 给 AI 的操作规程
-├── tests/                       # 48 项检查
-└── docs/                        # 架构说明、差异清单、截图
+├── pet/                         # Floating desktop window
+│   ├── traffic_light.py         # Main window (real rounded corners, color-key transparency, state rendering)
+│   ├── hook.py                  # Hook event → light color (atomic write to state.json)
+│   ├── state_store.py           # Thread/process-safe state writes
+│   ├── desktop_bridge.py        # Bridge to the control service (pause/take-over/preview)
+│   ├── wbproc.py                # Process probing, pythonw lookup, WMI launch
+│   ├── watchdog.pyw             # Login watchdog
+│   ├── manage_watchdog.py       # Watchdog install/uninstall/status
+│   ├── install_hooks.py         # Incremental hooks config writer
+│   └── launch_pet.pyw           # Double-click entry point (no console window)
+├── server/                      # Control service
+│   ├── launcher.py              # MCP entry point (disables telemetry)
+│   ├── panel_gateway.py         # Gateway: auth + routing
+│   ├── panel_service.py         # FastAPI service core
+│   ├── panel_common.py          # Port / connection file / request helpers
+│   ├── panel_hotkey.py          # Ctrl+Alt+F12 global hotkey
+│   ├── control_state.py         # Pause-lock state machine
+│   ├── task_lifecycle.py        # Task lifecycle
+│   ├── input_guard.py           # Input interception
+│   ├── reliability.py           # Observation freshness / key release
+│   └── install_config.ps1       # MCP registration script
+├── vendor/windows_mcp/          # Upstream 0.8.5 + fixes (see docs/UPSTREAM-DIFF.md)
+├── skills/windows-desktop-control/SKILL.md   # Operating procedure handed to the AI
+├── tests/                       # 48 checks
+└── docs/                        # Architecture notes, diff list, screenshots
 ```
 
 ---
 
-## 致谢与许可
+## Credits and license
 
-- 桌面驱动基于 [CursorTouch/Windows-MCP](https://github.com/CursorTouch/Windows-MCP)（MIT），
-  本仓库对其做了修复移植与安全收窄，详见 [NOTICE.md](NOTICE.md) 与 [docs/UPSTREAM-DIFF.md](docs/UPSTREAM-DIFF.md)
-- 本项目代码以 **MIT** 发布，见 [LICENSE](LICENSE)
+- The desktop driver builds on [CursorTouch/Windows-MCP](https://github.com/CursorTouch/Windows-MCP) (MIT).
+  This repo backports fixes and narrows its safety surface — see [NOTICE.md](NOTICE.md) and
+  [docs/UPSTREAM-DIFF.md](docs/UPSTREAM-DIFF.md).
+- This project's own code is released under **MIT** — see [LICENSE](LICENSE).
 
-欢迎提 issue 说明你的使用场景——尤其是「哪些操作你希望它在动之前先问你」，
-这比加功能更能决定这类工具好不好用。
+Issues describing your use case are very welcome — especially *"which actions would you want it to ask
+before touching?"* That question shapes whether this kind of tool is usable far more than any feature addition.
