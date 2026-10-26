@@ -1,5 +1,7 @@
 # Desktop Control Traffic Light
 
+**[English](README.en.md) · 中文**
+
 **给 AI 桌面代理一盏看得见的灯，和一只随时能按的刹车。**
 
 AI 在替你操作电脑时，右下角有盏小灯告诉你它在干嘛；点一下就能暂停，再点一下把键盘还给你。
