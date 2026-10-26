@@ -104,7 +104,7 @@ STALL_SECONDS = 300
 def resolve_show(state, ts, now, show_stall=True):
     """
     纯函数：把 state.json 的内容 + 当前时刻，算出**真正该显示什么**。
-    抽成纯函数是为了能脱掉 tkinter 直接单测（见 tests/test_state_logic.py 的写法）。
+    抽成纯函数是为了能脱掉 tkinter 直接单测（见 `自检_状态逻辑.py`）。
 
     规则：
       1. 太久没更新（> STALE_SECONDS）→ 会话早结束了，熄灯
@@ -615,6 +615,35 @@ class TrafficLight:
         self.root.mainloop()
 
 
+# 单实例锁的名字（全局命名互斥体，跨进程跨会话可见）
+MUTEX_NAME = "Local\\WorkBuddyTrafficLight.SingleInstance"
+
+
+def acquire_single_instance():
+    """原子地抢占单实例锁。抢到返回句柄，已被别人占着返回 None。
+
+    为什么不能只靠"查窗口"判断（2026-10-19 踩过）：
+      两个启动源（hook 的 ensure_pet_running + 开机看门狗）可能在同一秒各拉一次。
+      进程 A 从被拉起 → 建出窗口要 3~5 秒，这期间进程 B 去查窗口什么也查不到，
+      于是两个进程都认为自己该建窗口 —— 屏幕上是两个红绿灯。
+      查窗口 + 建窗口不是原子操作，这叫 TOCTOU 竞态。
+      命名互斥体由内核保证只有一个持有者，没有这个空窗期。
+    """
+    try:
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateMutexW.restype = ctypes.c_void_p
+        kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_bool, ctypes.c_wchar_p]
+        handle = kernel32.CreateMutexW(None, False, MUTEX_NAME)
+        if not handle:
+            return None
+        if ctypes.get_last_error() == 183:      # ERROR_ALREADY_EXISTS
+            return None
+        return handle
+    except Exception:
+        # 拿不到锁就别拦着自己跑，宁可多一个灯也别一个都没有
+        return None
+
+
 def find_own_window():
     """找已经存在的桌宠窗口（按标题精确匹配）。"""
     return wbproc.find_pet_window()
@@ -633,7 +662,7 @@ if __name__ == "__main__":
     def _boot_log(msg):
         """启动链路日志：区分「根本没启动」和「启动了但没显示出来」。"""
         try:
-            with open(os.path.join(DIR, "startup_diag.log"), "a", encoding="utf-8") as f:
+            with open(os.path.join(DIR, "启动诊断.log"), "a", encoding="utf-8") as f:
                 f.write("%s\t[桌宠] %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), msg))
         except Exception:
             pass
@@ -641,6 +670,21 @@ if __name__ == "__main__":
     _boot_log("进程启动 pid=%d 会话=%s" % (os.getpid(), os.environ.get("SESSIONNAME") or "?"))
 
     try:
+        # 第一道门：原子单实例锁（抢不到说明已有实例，连窗口都不用查）
+        mutex = acquire_single_instance()
+        if mutex is None:
+            old = None
+            for _ in range(10):          # 给对面最多 3 秒把窗口建出来
+                old = find_own_window()
+                if old:
+                    break
+                time.sleep(.3)
+            _boot_log("已有实例（互斥体被占） hwnd=%s，前置后退出" % old)
+            if old:
+                bring_to_front(old)
+            sys.exit(0)
+
+        # 第二道门：兼容没上互斥体的旧进程
         old = find_own_window()
         if old:
             # 已经在跑 → 不静默退出，而是把老窗口拎到最前，让你看得见
@@ -669,7 +713,7 @@ if __name__ == "__main__":
         # pythonw 没有控制台，异常会凭空消失 —— 一律落盘，方便排查
         import traceback
         try:
-            with open(os.path.join(DIR, "error_log.txt"), "a", encoding="utf-8") as f:
+            with open(os.path.join(DIR, "错误日志.txt"), "a", encoding="utf-8") as f:
                 f.write("\n" + "=" * 50 + "\n")
                 f.write(time.strftime("%Y-%m-%d %H:%M:%S") + "\n")
                 f.write(traceback.format_exc())
